@@ -29,11 +29,16 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Extract Android project
+        run: |
+          mkdir source
+          unzip -q HalabjaStudio_Android_Source_Starter.zip -d source
+
       - name: Build APK
-        run: gradle assembleDebug
+        run: gradle -p source assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Halabja-Studio-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: source/app/build/outputs/apk/debug/app-debug.apk
