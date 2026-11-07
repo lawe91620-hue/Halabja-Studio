@@ -1,4 +1,3 @@
-
 name: Build Halabja Studio APK
 
 on:
@@ -15,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out source
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Set up Java 17
@@ -24,7 +23,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle 8.9
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
@@ -41,46 +40,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           SETTINGS_FILE="$(find source -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
 
           if [[ -z "$SETTINGS_FILE" ]]; then
-            echo "::error::Gradle settings file not found."
-            find source -maxdepth 8 -type f -print | head -n 200
+            echo "::error::Gradle settings file not found"
             exit 1
           fi
 
           PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
-          echo "Found Gradle project: $PROJECT_DIR"
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Found project: $PROJECT_DIR"
 
-      - name: Create JVM 17 Gradle init script
+      - name: Create JVM 17 init script
         shell: bash
         run: |
-          set -euo pipefail
-
           cat > "$RUNNER_TEMP/halabja-jvm17.init.gradle" <<'GRADLE'
           import org.gradle.api.JavaVersion
-          import org.gradle.api.tasks.compile.JavaCompile
 
-          gradle.projectsEvaluated {
-              allprojects { project ->
-                  def android = project.extensions.findByName('android')
-
-                  if (android != null) {
-                      android.compileOptions.sourceCompatibility = JavaVersion.VERSION_17
-                      android.compileOptions.targetCompatibility = JavaVersion.VERSION_17
-                  }
-
-                  project.tasks.withType(JavaCompile).configureEach {
-                      sourceCompatibility = '17'
-                      targetCompatibility = '17'
-                  }
-
-                  project.tasks.configureEach { task ->
-                      if (task.class.name.contains('KotlinCompile')) {
-                          task.kotlinOptions.jvmTarget = '17'
+          gradle.beforeProject { project ->
+              ['com.android.application', 'com.android.library'].each { pluginId ->
+                  project.plugins.withId(pluginId) {
+                      def android = project.extensions.findByName('android')
+                      if (android != null) {
+                          android.compileOptions.sourceCompatibility = JavaVersion.VERSION_17
+                          android.compileOptions.targetCompatibility = JavaVersion.VERSION_17
                       }
+                  }
+              }
+
+              project.tasks.configureEach { task ->
+                  if (task.class.name.contains('KotlinCompile')) {
+                      task.kotlinOptions.jvmTarget = '17'
                   }
               }
           }
@@ -93,12 +83,10 @@ jobs:
           PROJECT_DIR: ${{ steps.project.outputs.project_dir }}
         run: |
           set -uo pipefail
-
           BUILD_LOG="$RUNNER_TEMP/gradle-build.log"
 
           gradle \
             --console=plain \
-            --info \
             --stacktrace \
             --init-script "$RUNNER_TEMP/halabja-jvm17.init.gradle" \
             -p "$PROJECT_DIR" \
@@ -107,31 +95,22 @@ jobs:
           BUILD_STATUS=${PIPESTATUS[0]}
 
           if [[ "$BUILD_STATUS" -ne 0 ]]; then
-            echo "::error::assembleDebug failed with exit code $BUILD_STATUS"
-            echo "First Gradle error lines:"
-            grep -n -m 20 -E '(^|[[:space:]])(e:|error:|What went wrong:|Execution failed for task|Could not |Failed to |Inconsistent JVM-target)' "$BUILD_LOG" || true
-
-            echo "Gradle build files:"
-            find "$PROJECT_DIR" -maxdepth 4 -type f \
-              \( -name build.gradle -o -name build.gradle.kts \
-              -o -name settings.gradle -o -name settings.gradle.kts \) -print
-
+            echo "::error::Gradle build failed"
+            grep -n -m 20 -E 'What went wrong:|Execution failed for task|e: |error:|Could not |Failed to |Inconsistent JVM-target' "$BUILD_LOG" || true
             exit "$BUILD_STATUS"
           fi
 
-          APK_PATH="$(find "$PROJECT_DIR" -type f \
-            -path '*/build/outputs/apk/debug/*.apk' -print -quit)"
+          APK_PATH="$(find "$PROJECT_DIR" -type f -path '*/build/outputs/apk/debug/*.apk' -print -quit)"
 
           if [[ -z "$APK_PATH" ]]; then
-            echo "::error::No debug APK was generated."
-            find "$PROJECT_DIR" -type f -path '*/build/outputs/apk/*/*.apk' -print || true
+            echo "::error::APK file not found"
             exit 1
           fi
 
-          echo "APK generated: $APK_PATH"
           echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "APK generated: $APK_PATH"
 
-      - name: Upload debug APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Halabja-Studio-APK
