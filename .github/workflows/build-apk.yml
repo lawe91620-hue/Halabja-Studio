@@ -31,14 +31,31 @@ jobs:
 
       - name: Extract Android project
         run: |
-          mkdir source
+          mkdir -p source
           unzip -q HalabjaStudio_Android_Source_Starter-2.zip -d source
 
+      - name: Find Android project
+        run: |
+          echo "Searching for Gradle project..."
+          PROJECT_DIR="$(find source -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit | xargs -r dirname)"
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Gradle settings file was not found."
+            echo "Files extracted from ZIP:"
+            find source -maxdepth 5 -type f
+            exit 1
+          fi
+
+          echo "Android project found at: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
       - name: Build APK
-        run: gradle -p source assembleDebug
+        run: |
+          gradle -p "$PROJECT_DIR" assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Halabja-Studio-APK
-          path: source/app/build/outputs/apk/debug/app-debug.apk
+          path: source/**/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
