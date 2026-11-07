@@ -41,6 +41,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           SETTINGS_FILE="$(find source -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
 
           if [[ -z "$SETTINGS_FILE" ]]; then
@@ -53,23 +54,33 @@ jobs:
           echo "Found Gradle project: $PROJECT_DIR"
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-      - name: Create temporary JVM 17 Gradle init script
+      - name: Create JVM 17 Gradle init script
         shell: bash
         run: |
           set -euo pipefail
 
           cat > "$RUNNER_TEMP/halabja-jvm17.init.gradle" <<'GRADLE'
+          import org.gradle.api.JavaVersion
           import org.gradle.api.tasks.compile.JavaCompile
 
-          gradle.beforeProject { project ->
-              project.tasks.withType(JavaCompile).configureEach {
-                  sourceCompatibility = '17'
-                  targetCompatibility = '17'
-              }
+          gradle.projectsEvaluated {
+              allprojects { project ->
+                  def android = project.extensions.findByName('android')
 
-              project.tasks.configureEach { task ->
-                  if (task.class.name.contains('KotlinCompile')) {
-                      task.kotlinOptions.jvmTarget = '17'
+                  if (android != null) {
+                      android.compileOptions.sourceCompatibility = JavaVersion.VERSION_17
+                      android.compileOptions.targetCompatibility = JavaVersion.VERSION_17
+                  }
+
+                  project.tasks.withType(JavaCompile).configureEach {
+                      sourceCompatibility = '17'
+                      targetCompatibility = '17'
+                  }
+
+                  project.tasks.configureEach { task ->
+                      if (task.class.name.contains('KotlinCompile')) {
+                          task.kotlinOptions.jvmTarget = '17'
+                      }
                   }
               }
           }
@@ -83,32 +94,37 @@ jobs:
         run: |
           set -uo pipefail
 
-          java -version
-          gradle --version
+          BUILD_LOG="$RUNNER_TEMP/gradle-build.log"
 
-          if gradle \
+          gradle \
+            --console=plain \
+            --info \
+            --stacktrace \
             --init-script "$RUNNER_TEMP/halabja-jvm17.init.gradle" \
             -p "$PROJECT_DIR" \
-            assembleDebug \
-            --stacktrace; then
-            echo "Build completed."
-          else
-            BUILD_STATUS=$?
+            assembleDebug 2>&1 | tee "$BUILD_LOG"
+
+          BUILD_STATUS=${PIPESTATUS[0]}
+
+          if [[ "$BUILD_STATUS" -ne 0 ]]; then
             echo "::error::assembleDebug failed with exit code $BUILD_STATUS"
+            echo "First Gradle error lines:"
+            grep -n -m 20 -E '(^|[[:space:]])(e:|error:|What went wrong:|Execution failed for task|Could not |Failed to |Inconsistent JVM-target)' "$BUILD_LOG" || true
 
             echo "Gradle build files:"
-            find "$PROJECT_DIR" -maxdepth 4 -type f \( -name build.gradle -o -name build.gradle.kts -o -name settings.gradle -o -name settings.gradle.kts \) -print
-
-            echo "Generated APKs:"
-            find "$PROJECT_DIR" -type f -path '*/build/outputs/apk/*/*.apk' -print || true
+            find "$PROJECT_DIR" -maxdepth 4 -type f \
+              \( -name build.gradle -o -name build.gradle.kts \
+              -o -name settings.gradle -o -name settings.gradle.kts \) -print
 
             exit "$BUILD_STATUS"
           fi
 
-          APK_PATH="$(find "$PROJECT_DIR" -type f -path '*/build/outputs/apk/debug/*.apk' -print -quit)"
+          APK_PATH="$(find "$PROJECT_DIR" -type f \
+            -path '*/build/outputs/apk/debug/*.apk' -print -quit)"
 
           if [[ -z "$APK_PATH" ]]; then
             echo "::error::No debug APK was generated."
+            find "$PROJECT_DIR" -type f -path '*/build/outputs/apk/*/*.apk' -print || true
             exit 1
           fi
 
