@@ -32,7 +32,7 @@ jobs:
       - name: Extract Android project
         run: |
           mkdir source
-          unzip -q HalabjaStudio_Android_Source_Starter.zip -d source
+          unzip -q HalabjaStudio_Android_Source_Starter-2.zip -d source
 
       - name: Build APK
         run: gradle -p source assembleDebug
